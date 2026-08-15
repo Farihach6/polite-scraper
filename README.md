@@ -1,79 +1,182 @@
 
 # The Polite Scraper
 
-FlyRank Internship · Backend Track · Week 5 · Assignment A9
+**FlyRank Internship · Backend Track · Week 5 · Assignment A9**
 
-A small, polite scraping pipeline that downloads the first three catalogue pages of Books to Scrape, discovers all 60 book URLs, visits every book detail page, extracts raw records, normalizes the data, validates it, and stores the results locally.
+The Polite Scraper is a small, ethical, end-to-end web scraping pipeline built with Python.
 
-The pipeline uses caching to avoid repeatedly requesting the same pages and separates valid records from invalid ones.
+It targets the public practice sandbox **Books to Scrape**, downloads the first three catalogue pages, discovers 60 book URLs, fetches and extracts book details, normalizes and validates the data, stores valid records locally, survives failed pages without crashing, and generates an honest run report.
 
-## Target classification (Stage 0)
+The project demonstrates the complete pipeline:
 
-* **Site:** `books.toscrape.com` — the "Books" sandbox listed on `toscrape.com`. Its description identifies it as a fictional bookstore designed as a safe practice environment for web scraping.
-* **Why this target:** it is a public practice sandbox — no real business, no personal data, no paywall, and no login required for the pages used in this project.
-* **Scope:** the first 3 catalogue pages only (`catalogue/page-1.html` through `page-3.html`), plus the 60 individual book detail pages linked from them.
-* **robots.txt result:** `GET https://books.toscrape.com/robots.txt` → **404 Not Found**. A missing robots file is not permission by itself, but this project is limited to a site explicitly designed as a scraping practice sandbox.
-* **Data collected:** title, product URL, raw price, normalized price, stock availability, star rating, description, and provenance fields (`source_page`, `fetched_at`). No personal data is collected.
+```text
+Classify
+    ↓
+Fetch
+    ↓
+Cache
+    ↓
+Discover
+    ↓
+Extract
+    ↓
+Normalize
+    ↓
+Validate
+    ↓
+Store
+    ↓
+Handle Failures
+    ↓
+Report
+````
+
+---
+
+# Target Classification
+
+## Target
+
+**Site:** `https://books.toscrape.com`
+
+Books to Scrape is a fictional bookstore created as a safe practice environment for learning and testing web scraping.
+
+## Why this target was selected
+
+This project uses a public scraping practice sandbox:
+
+* no login is required
+* no paywall is involved
+* no personal data is collected
+* no real customer or business data is processed
+* the site is designed for practicing scraping technologies
+
+## Scope
+
+The scraper intentionally processes only:
+
+```text
+Catalogue pages:
+page-1.html
+page-2.html
+page-3.html
+```
+
+and the individual book detail pages discovered from those three catalogue pages.
+
+Expected scope:
+
+```text
+3 catalogue pages
+60 unique book URLs
+60 book detail pages
+```
+
+Nothing outside this scope is intentionally requested.
+
+## robots.txt
+
+The following endpoint was checked:
+
+```text
+https://books.toscrape.com/robots.txt
+```
+
+Result:
+
+```text
+404 Not Found
+```
+
+A missing `robots.txt` file is not treated as automatic permission. The project is limited to a website explicitly designed as a scraping practice sandbox.
+
+## Data collected
+
+For each book, the pipeline collects:
+
+```text
+title
+product_url
+price_text
+price_gbp
+availability_text
+rating_text
+description
+source_page
+fetched_at
+```
+
+No personal or sensitive data is collected.
 
 **I will not reuse this code on another site without checking its rules and terms first.**
 
-## Status
+---
 
-* [x] Stage 0 — Check before you collect
-* [x] Stage 1 — Fetch once, cache once
-* [x] Stage 2 — Find all three pages
-* [x] Stage 3 — Extract the raw records
-* [x] Stage 4 — Clean it, check it, store it
-* [ ] Stage 5 — One bad page must not kill the run
-* [ ] Stage 6 — Publish the evidence
-* [ ] Bonus — The AI rematch
+# Features
 
-# What is implemented
-
-## Stage 1 — Fetch and cache
+## Polite Fetching
 
 The scraper:
 
 * sends a custom User-Agent
 * uses a request timeout
-* accepts HTTP 200 as a successful response
-* saves fetched HTML in the local `cache/` directory
-* uses cached files on later runs
-* waits between real, non-cached requests
+* checks HTTP status codes
+* applies a delay between real requests
+* avoids unnecessary requests through caching
 
-## Stage 2 — Discovery, pagination, and deduplication
+## Local Caching
+
+Fetched HTML is stored locally.
+
+On the first request:
+
+```text
+FETCH
+```
+
+On later runs:
+
+```text
+CACHE HIT
+```
+
+Cached pages prevent repeatedly requesting the same content from the target website.
+
+---
+
+# Pagination and Discovery
 
 The scraper:
 
-* starts from `catalogue/page-1.html`
-* follows the catalogue's own `next` links
-* stops after a maximum of 3 catalogue pages
-* extracts every book URL from each page
-* resolves relative URLs using `urljoin`
-* preserves the catalogue page where each book was discovered
-* deduplicates book URLs while preserving first-seen order
+1. starts at catalogue page 1
+2. parses book links
+3. follows the website's own `next` link
+4. stops after a maximum of 3 catalogue pages
+5. converts relative URLs into absolute URLs
+6. deduplicates discovered book URLs
+7. preserves the catalogue page where each book was discovered
 
-Discovery stores provenance as:
+Discovery preserves provenance using:
 
 ```text
 (book_url, source_page)
 ```
 
-This allows every extracted record to retain information about where the book was discovered.
+Expected result:
 
-## Stage 3 — Raw record extraction
+```text
+catalogue_pages=3
+discovered=60
+unique_urls=60
+```
 
-After discovering the 60 unique book URLs, the scraper:
+---
 
-* fetches every book detail page
-* uses the same polite fetch and cache system
-* creates a unique cache filename for each book
-* extracts data from the relevant product area
-* keeps raw values before normalization
-* stores missing descriptions as `None`
-* records provenance and extraction time
+# Raw Data Extraction
 
-Each raw record contains these 8 fields:
+Every discovered book detail page is processed individually.
+
+The scraper extracts:
 
 ```text
 title
@@ -86,107 +189,155 @@ source_page
 fetched_at
 ```
 
-Example raw record:
-
-```json
-{
-  "title": "A Light in the Attic",
-  "product_url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
-  "price_text": "£51.77",
-  "availability_text": "In stock (22 available)",
-  "rating_text": "Three",
-  "description": "Book description...",
-  "source_page": "https://books.toscrape.com/catalogue/page-1.html",
-  "fetched_at": "2026-08-15T00:00:00+00:00"
-}
-```
-
-## Stage 4 — Normalize, validate, and store
-
-Stage 4 processes every raw record through three steps:
+Missing descriptions are stored as:
 
 ```text
-Raw Record
-    ↓
-Normalization
-    ↓
-Validation
-    ↓
-Valid / Invalid Separation
-    ↓
-JSON Storage
+None
 ```
 
-### Normalization
+The scraper does not invent missing data.
 
-The raw price text is converted into a numeric value:
+Expected result:
 
 ```text
-"£51.77" → 51.77
+detail_pages=60
 ```
 
-The normalized field is:
+---
+
+# Normalization
+
+Raw scraped data is cleaned before validation.
+
+For example:
+
+```text
+"£51.77"
+```
+
+is converted into:
+
+```text
+51.77
+```
+
+and stored as:
 
 ```text
 price_gbp
 ```
 
-The normalizer also handles the encoding artifact encountered during extraction:
+The normalizer also handles encoding artifacts such as:
 
 ```text
-"Â£51.77" → 51.77
+"Â£51.77"
 ```
 
-The numeric part is extracted and converted into a Python `float`.
+which is normalized into the correct numeric price.
 
-### Validation
+Both the original and normalized values are preserved:
 
-The cleaned records are validated using **Pydantic**.
+```text
+price_text
+price_gbp
+```
+
+---
+
+# Validation
+
+All cleaned records are validated using **Pydantic**.
 
 Validation checks include:
 
 * title must not be blank
 * price text must not be blank
 * availability text must not be blank
-* `product_url` must be an absolute HTTPS URL
-* `source_page` must be an absolute HTTPS URL
-* `price_gbp` must not be negative
+* product URL must be an absolute HTTPS URL
+* source page must be an absolute HTTPS URL
+* normalized price must not be negative
 
-Invalid records are not included in the valid dataset.
+Records that fail normalization or validation are separated from valid records.
 
-### Storage
+---
 
-After normalization and validation, records are separated into:
+# Failure Resilience
+
+One failed page must not terminate the entire scraping run.
+
+Each page fetch is isolated.
+
+The scraper:
+
+* catches `FetchError` per page
+* logs the failed page
+* skips the failed page
+* continues processing the remaining pages
+
+## Retry policy
+
+The scraper retries once for:
+
+```text
+Timeout
+HTTP 5xx server errors
+```
+
+The scraper does not retry:
+
+```text
+HTTP 404
+HTTP 403
+```
+
+This prevents unnecessary or impolite repeated requests.
+
+---
+
+# Stage 5 Resilience Demo
+
+A deliberately broken URL can be injected to verify that the pipeline survives a failed page.
+
+Run:
+
+```bash
+python src/main.py --inject-fake-url
+```
+
+The expected behavior is:
+
+```text
+60 valid records
+1 failed page
+Pipeline completes successfully
+```
+
+Example:
+
+```text
+valid_records=60 invalid_records=0 failed_pages=1
+```
+
+The run report records the failed page instead of allowing the program to crash.
+
+---
+
+# Output
+
+The pipeline writes its results to:
 
 ```text
 output/
 ├── books.json
-└── errors.json
+├── errors.json
+└── run-report.json
 ```
 
-* `books.json` contains valid, cleaned, validated records.
-* `errors.json` contains records that could not be normalized or validated.
+## `books.json`
 
-Valid records are deduplicated using their `product_url`.
+Contains valid, normalized, schema-validated book records.
 
-### Current Stage 4 result
-
-The current pipeline successfully produces:
-
-```text
-catalogue_pages=3 discovered=60 unique_urls=60
-detail_pages=60
-valid_records=60 invalid_records=0
-```
-
-This means:
-
-* 60 book pages were extracted
-* 60 records were normalized
-* 60 records passed validation
-* 0 records failed validation
-
-Example cleaned record:
+Example:
 
 ```json
 {
@@ -202,44 +353,80 @@ Example cleaned record:
 }
 ```
 
-# Project structure
+## `errors.json`
+
+Contains records that could not be normalized or validated.
+
+A successful run currently produces:
+
+```text
+[]
+```
+
+## `run-report.json`
+
+Contains an honest summary of the run.
+
+Example:
+
+```json
+{
+  "start_time": "2026-08-15T04:55:59.803285+00:00",
+  "end_time": "2026-08-15T04:56:03.416762+00:00",
+  "duration_seconds": 3.613,
+  "pages_fetched": 0,
+  "cache_hits": 63,
+  "valid_records": 60,
+  "invalid_records": 0,
+  "failed_pages": 1,
+  "failed_page_details": [
+    {
+      "url": "https://books.toscrape.com/catalogue/this-book-does-not-exist_9999/index.html",
+      "reason": "HTTP 404 - not retrying"
+    }
+  ]
+}
+```
+
+The exact numbers may differ depending on whether pages are already cached.
+
+---
+
+# Project Structure
 
 ```text
 polite-scraper/
 │
-├── cache/                     # Cached catalogue and book HTML pages
+├── cache/                     # Local cached HTML pages
 │
 ├── output/
 │   ├── books.json             # Valid normalized records
-│   └── errors.json            # Invalid records and errors
+│   ├── errors.json            # Invalid records/errors
+│   └── run-report.json        # Summary of each run
 │
 ├── src/
-│   ├── main.py                # Pipeline entry point
-│   ├── fetcher.py             # Polite HTTP fetching and caching
-│   ├── extractor.py           # HTML parsing and raw extraction
-│   ├── normalizer.py          # Data normalization
-│   ├── schema.py              # Pydantic validation schema
-│   └── reporter.py            # Later reporting stage
+│   ├── main.py                # Pipeline orchestration
+│   ├── fetcher.py             # Polite HTTP fetching, cache and retry
+│   ├── extractor.py           # HTML parsing and record extraction
+│   ├── normalizer.py          # Data cleaning and normalization
+│   ├── schema.py              # Pydantic validation
+│   └── reporter.py            # Run report generation
 │
-├── tests/
-│   ├── test_fetcher_smoke.py
-│   ├── test_extractor_smoke.py
-│   └── test_stage3_extract_smoke.py
-│
-├── ai-version/
 ├── requirements.txt
+├── .gitignore
 └── README.md
 ```
 
-# Tech stack
+---
 
-Python 3.10+
+# Tech Stack
 
-Current dependencies:
+* Python 3.10+
+* Requests
+* BeautifulSoup4
+* Pydantic
 
-* `requests`
-* `beautifulsoup4`
-* `pydantic`
+---
 
 # Installation
 
@@ -247,6 +434,11 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/Farihach6/polite-scraper.git
+```
+
+Move into the project:
+
+```bash
 cd polite-scraper
 ```
 
@@ -256,7 +448,9 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-# Run the scraper
+---
+
+# Run the Scraper
 
 From the project root:
 
@@ -266,161 +460,241 @@ python src/main.py
 
 The pipeline will:
 
-1. Read or fetch the first catalogue page.
-2. Follow the catalogue pagination.
-3. Stop after 3 catalogue pages.
-4. Discover all book URLs.
-5. Deduplicate the URLs.
-6. Preserve each book's source catalogue page.
-7. Fetch or read cached book detail pages.
-8. Extract raw book records.
-9. Normalize the records.
-10. Validate the records using Pydantic.
-11. Separate valid and invalid records.
-12. Store the results in JSON files.
+1. Fetch or load cached catalogue pages.
+2. Follow pagination for up to 3 pages.
+3. Discover book URLs.
+4. Deduplicate URLs.
+5. Preserve source page provenance.
+6. Fetch or load cached book detail pages.
+7. Extract raw records.
+8. Normalize the data.
+9. Validate records with Pydantic.
+10. Separate valid and invalid records.
+11. Write JSON output.
+12. Generate a run report.
 
-Expected summary:
+Expected checkpoint:
 
 ```text
 catalogue_pages=3 discovered=60 unique_urls=60
 detail_pages=60
-valid_records=60 invalid_records=0
+valid_records=60 invalid_records=0 failed_pages=0
 ```
 
-# Current pipeline
+On later runs, most pages should display:
+
+```text
+CACHE HIT
+```
+
+because the HTML is loaded from the local cache.
+
+---
+
+# Run the Failure Resilience Demo
+
+To deliberately inject one broken page:
+
+```bash
+python src/main.py --inject-fake-url
+```
+
+Expected result:
+
+```text
+60 valid records
+0 invalid records
+1 failed page
+```
+
+The scraper should complete without crashing.
+
+Check the report:
+
+```powershell
+Get-Content output/run-report.json
+```
+
+Expected key result:
+
+```json
+"failed_pages": 1
+```
+
+---
+
+# Current Pipeline
 
 ```text
 START
   │
   ▼
-Fetch catalogue pages
+Target Classification
   │
   ▼
-Parse book URLs + next links
+Fetch Catalogue Page
   │
   ▼
-Follow pagination
+Cache HTML
+  │
+  ▼
+Parse Book URLs + Next Link
+  │
+  ▼
+Follow Pagination
   │
   ├── Page 1
   ├── Page 2
   └── Page 3
   │
   ▼
-Discover 60 book URLs
+Discover 60 URLs
   │
   ▼
-Deduplicate URLs
+Deduplicate
   │
   ▼
-Preserve (book_url, source_page)
+Preserve Provenance
   │
   ▼
-Fetch each detail page
+Fetch Detail Pages
   │
   ▼
-Extract 8 raw fields
+Extract Raw Records
   │
   ▼
-Normalize price and record values
+Normalize Data
   │
   ▼
 Validate with Pydantic
   │
-  ├── Valid records
+  ├── Valid Records
   │
-  └── Invalid records
+  └── Invalid Records
   │
   ▼
-Store JSON output
+Store JSON Output
+  │
+  ▼
+Handle Failed Pages
+  │
+  ▼
+Generate Run Report
+  │
+  ▼
+END
 ```
 
-# Politeness rules
+---
 
-* **User-Agent:** identifies the scraper
-* **Timeout:** requests do not wait forever
-* **Status check:** HTTP responses are checked
-* **Cache:** fetched HTML is stored locally
-* **Cache reuse:** later runs reuse cached pages
-* **Delay:** a minimum delay is applied between real requests
-* **Limited scope:** only 3 catalogue pages and their linked book detail pages are processed
+# Politeness Rules
 
-# Tests
+The scraper follows these rules:
 
-The project includes network-free smoke tests so core logic can be verified without depending on the live website.
+* **Identifying User-Agent** — requests identify the scraper.
+* **Timeout** — requests do not wait forever.
+* **Status checking** — HTTP responses are checked before processing.
+* **Caching** — already fetched pages are reused locally.
+* **Minimum delay** — real requests are spaced apart.
+* **Limited retries** — only timeout and 5xx errors are retried once.
+* **No retry for 404/403** — missing or forbidden pages are not repeatedly requested.
+* **Limited scope** — only three catalogue pages and their discovered book pages are processed.
+* **Failure isolation** — one failed page does not terminate the entire pipeline.
 
-## Stage 1
+---
 
-`tests/test_fetcher_smoke.py`
+# Why No Browser Was Needed
 
-Tests:
+This target serves the required catalogue and book information directly in the HTML returned by standard HTTP requests.
+
+Because:
+
+* no JavaScript rendering was required
+* no login was required
+* no browser interaction was required
+
+the project uses:
 
 ```text
-fetch → cache → cache hit
+requests + BeautifulSoup
 ```
 
-The HTTP layer is mocked to verify that the caching logic works independently of network access.
+instead of browser automation.
 
-## Stage 2
+Using a full browser would add unnecessary complexity and resource usage for this target.
 
-`tests/test_extractor_smoke.py`
+---
 
-Tests:
+# Limitation
 
-* catalogue page parsing
-* absolute URL resolution
-* pagination
-* `max_pages=3` stopping condition
-* URL deduplication
-* source catalogue page preservation
+This scraper is intentionally designed for a fixed, small practice scope.
 
-## Stage 3
+Current limitations include:
 
-`tests/test_stage3_extract_smoke.py`
+* only the first 3 catalogue pages are processed
+* data is stored locally as JSON
+* caching is local and file-based
+* the scraper is not intended to automatically scale to arbitrary websites
+* changing HTML structure may require updating the extraction selectors
 
-Tests:
+---
 
-* all 8 raw fields are extracted
-* provenance fields are preserved
-* missing descriptions become `None`
-* `fetched_at` is a valid ISO timestamp
+# Final Checkpoint
 
-Run all tests:
-
-```bash
-python -m pytest -q
-```
-
-# Current progress
-
-The pipeline currently completes:
+The completed project demonstrates:
 
 ```text
-Stage 0 → Target classification
-Stage 1 → Fetch + cache
-Stage 2 → Discovery + pagination + deduplication
-Stage 3 → Raw detail-page extraction
-Stage 4 → Normalize + validate + store
+✓ Target classification
+✓ Polite HTTP requests
+✓ User-Agent
+✓ Timeout
+✓ Local caching
+✓ Pagination
+✓ URL discovery
+✓ URL deduplication
+✓ Provenance tracking
+✓ Detail page extraction
+✓ Missing value handling
+✓ Data normalization
+✓ Pydantic validation
+✓ Valid/invalid record separation
+✓ JSON storage
+✓ Retry policy
+✓ Per-page failure isolation
+✓ Broken-page resilience
+✓ Honest run reporting
+✓ Public GitHub publication
 ```
 
-## Next stage
+Final resilience checkpoint:
 
 ```text
-Stage 5 → One bad page must not kill the run
+60 good pages + 1 deliberately broken URL
+                ↓
+Pipeline does not crash
+                ↓
+60 valid records
+failed_pages = 1
 ```
 
-Stage 5 will focus on fault tolerance so that a single failed or malformed page does not terminate the entire scraping pipeline.
+---
 
-# Responsible scraping note
+# Responsible Scraping
 
-This project is intentionally limited to a public scraping practice sandbox. The code is not presented as permission to scrape arbitrary websites.
+This project is intentionally restricted to a public scraping practice sandbox.
 
-Before adapting this scraper to another target, check:
+The code should not be interpreted as permission to scrape arbitrary websites.
+
+Before adapting this project to another target, check:
 
 * the site's terms and usage rules
 * `robots.txt` where applicable
 * authentication and access restrictions
 * rate limits
 * whether personal or sensitive data is involved
+* whether automated access is appropriate
 
 **I will not reuse this code on another site without checking its rules and terms first.**
+
+````
 
