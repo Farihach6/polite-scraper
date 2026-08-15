@@ -1,11 +1,15 @@
 """
 The Polite Scraper — entry point.
 
-Current status:
-    Stage 0: Target classification
-    Stage 1: Fetch + Cache
-    Stage 2: Discovery + Pagination + Deduplication
-    Stage 3: Extract raw records
+FlyRank Internship, Backend Track, Week 5, Assignment A9.
+
+Stages implemented:
+
+    Stage 0 — Target classification
+    Stage 1 — Fetch + cache
+    Stage 2 — Discovery + pagination + deduplication
+    Stage 3 — Raw record extraction
+    Stage 4 — Normalize + validate + store
 """
 
 import json
@@ -20,13 +24,23 @@ from extractor import (
 
 from fetcher import polite_get
 
+from normalizer import normalize_record
+
+from schema import validate_record
+
 
 START_URL = (
     "https://books.toscrape.com/catalogue/page-1.html"
 )
 
 CACHE_DIR = (
-    Path(__file__).resolve().parent.parent / "cache"
+    Path(__file__).resolve().parent.parent
+    / "cache"
+)
+
+OUTPUT_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "output"
 )
 
 MAX_CATALOGUE_PAGES = 3
@@ -38,24 +52,17 @@ def discover_book_urls(
     max_pages: int = MAX_CATALOGUE_PAGES,
 ):
     """
-    Discover books while preserving their source catalogue page.
-
-    Returns:
-
-        catalogue_pages_visited
-
-        all_pairs:
-            [(book_url, source_page), ...]
-
-        unique_pairs:
-            Deduplicated while preserving first appearance.
+    Discover books while preserving the catalogue
+    page where each book was found.
     """
 
     page_url = start_url
 
     page_num = 1
 
-    all_pairs: list[tuple[str, str]] = []
+    all_pairs: list[
+        tuple[str, str]
+    ] = []
 
     while (
         page_url
@@ -96,8 +103,8 @@ def discover_book_urls(
         page_num - 1
     )
 
-    # Dedupe by book URL while preserving
-    # the first source page.
+    # Deduplicate while preserving the
+    # first source page.
 
     seen: set[str] = set()
 
@@ -157,8 +164,8 @@ def extract_all_records(
     cache_dir: Path,
 ) -> list[dict]:
     """
-    Fetch every unique book page and
-    extract its raw record.
+    Fetch every unique book detail page
+    and extract its raw record.
     """
 
     records: list[dict] = []
@@ -186,7 +193,119 @@ def extract_all_records(
     return records
 
 
+def build_clean_dataset(
+    raw_records: list[dict],
+) -> tuple[
+    list[dict],
+    list[dict],
+]:
+    """
+    Normalize and validate all raw records.
+
+    Valid records are deduplicated by
+    canonical product URL.
+
+    Invalid records are returned as:
+
+        {
+            "product_url": "...",
+            "reason": "..."
+        }
+    """
+
+    valid_by_url: dict[
+        str,
+        dict,
+    ] = {}
+
+    errors: list[dict] = []
+
+    for raw in raw_records:
+
+        product_url = raw.get(
+            "product_url"
+        )
+
+        # ---------- NORMALIZE ----------
+
+        try:
+
+            cleaned = normalize_record(
+                raw
+            )
+
+        except ValueError as exc:
+
+            errors.append(
+                {
+                    "product_url": product_url,
+                    "reason": str(exc),
+                }
+            )
+
+            continue
+
+        # ---------- VALIDATE ----------
+
+        record, error_reason = (
+            validate_record(
+                cleaned
+            )
+        )
+
+        if error_reason is not None:
+
+            errors.append(
+                {
+                    "product_url": product_url,
+                    "reason": error_reason,
+                }
+            )
+
+            continue
+
+        # ---------- DEDUPLICATE ----------
+
+        valid_by_url[
+            record.product_url
+        ] = record.model_dump()
+
+    valid_records = list(
+        valid_by_url.values()
+    )
+
+    return (
+        valid_records,
+        errors,
+    )
+
+
+def write_json(
+    path: Path,
+    data,
+) -> None:
+    """
+    Write JSON safely using UTF-8.
+    """
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    path.write_text(
+        json.dumps(
+            data,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
+
+    # ---------- DISCOVERY ----------
 
     (
         catalogue_pages,
@@ -203,22 +322,51 @@ def main() -> None:
         f"unique_urls={len(unique_pairs)}"
     )
 
-    records = extract_all_records(
+    # ---------- EXTRACTION ----------
+
+    raw_records = extract_all_records(
         unique_pairs,
         CACHE_DIR,
     )
 
     print(
-        f"detail_pages={len(records)}"
+        f"detail_pages={len(raw_records)}"
     )
 
-    # Show the first extracted record.
-    if records:
+    # ---------- CLEAN + VALIDATE ----------
+
+    valid_records, errors = (
+        build_clean_dataset(
+            raw_records
+        )
+    )
+
+    # ---------- STORE ----------
+
+    write_json(
+        OUTPUT_DIR / "books.json",
+        valid_records,
+    )
+
+    write_json(
+        OUTPUT_DIR / "errors.json",
+        errors,
+    )
+
+    # ---------- SUMMARY ----------
+
+    print(
+        f"valid_records={len(valid_records)} "
+        f"invalid_records={len(errors)}"
+    )
+
+    if valid_records:
 
         print(
             json.dumps(
-                records[0],
+                valid_records[0],
                 indent=2,
+                ensure_ascii=False,
             )
         )
 
