@@ -1,16 +1,21 @@
 """
 fetcher.py — the polite HTTP layer.
 
-Stage 1 responsibilities (implemented here):
+Stage 1 responsibilities:
     - send an honest, identifying User-Agent
     - enforce a request timeout (never wait forever)
     - check the status code before returning anything
     - cache every fetched page to disk, and read from that cache on
       later calls instead of re-requesting the live site
 
-Stage 5 will extend `polite_get` with retry-on-5xx/timeout and a
-`FetchResult.failed` path so one broken page can't kill a run. That
-logic is stubbed here (see `retries` param) but not yet exercised.
+Stage 5 responsibilities (implemented here):
+    - retry once on a timeout or a 5xx server error, waiting a moment
+      first
+    - never retry a 404 (the page does not exist) or a 403 (the site
+      said no) — asking again would either do nothing or be rude
+    - raise `FetchError` (not a bare exception) on final failure, so
+      the caller can catch exactly that and log-and-skip the page
+      instead of crashing the whole run
 """
 
 from __future__ import annotations
@@ -23,7 +28,25 @@ import requests
 
 USER_AGENT = "FlyRankInternshipA9/1.0 (+https://github.com/your-username/scraper)"
 TIMEOUT_SECONDS = 10
-MIN_DELAY_SECONDS = 0.5  # only applied between REAL (non-cached) requests
+MIN_DELAY_SECONDS = 0.5   # only applied between REAL (non-cached) requests
+RETRY_DELAY_SECONDS = 2   # wait a moment before the one retry
+MAX_RETRIES = 1           # one retry, only for timeouts / 5xx
+
+NON_RETRYABLE_STATUS_CODES = {404, 403}
+
+
+class FetchError(Exception):
+    """
+    Raised when a page could not be fetched — after the retry policy
+    has already been applied. Carries enough context for the caller
+    to log a clean, honest failure instead of crashing.
+    """
+
+    def __init__(self, url: str, status_code: int | None, reason: str):
+        super().__init__(f"{url} -> {reason}")
+        self.url = url
+        self.status_code = status_code
+        self.reason = reason
 
 
 @dataclass
@@ -42,18 +65,20 @@ def _cache_path(cache_dir: Path, filename: str) -> Path:
 
 def polite_get(url: str, cache_dir: Path, filename: str) -> FetchResult:
     """
-    Fetch `url`, politely, with on-disk caching.
+    Fetch `url`, politely, with on-disk caching and a bounded retry.
 
     First call for a given `filename`: sends a real HTTP GET with an
-    honest User-Agent and a timeout, checks the status code, saves the
-    HTML to `cache_dir/filename`, and prints FETCH.
+    honest User-Agent and a timeout. On success (200), saves the HTML
+    to `cache_dir/filename` and prints FETCH. On a timeout or 5xx, it
+    waits `RETRY_DELAY_SECONDS` and tries once more before giving up.
+    A 404 or 403 fails immediately, with no retry.
 
     Every later call for the same `filename`: reads the saved copy
     from disk instead of hitting the network again, and prints
     CACHE HIT.
 
-    Raises `requests.HTTPError` if the live request does not return
-    200 — a non-200 response is a failed fetch, not HTML to parse.
+    Raises `FetchError` if the page could not be fetched after the
+    retry policy has been applied — never a bare requests exception.
     """
     path = _cache_path(cache_dir, filename)
 
@@ -69,28 +94,51 @@ def polite_get(url: str, cache_dir: Path, filename: str) -> FetchResult:
         print(f"CACHE HIT  {url}  ({result.size_bytes} bytes)")
         return result
 
-    response = requests.get(
-        url,
-        headers={"User-Agent": USER_AGENT},
-        timeout=TIMEOUT_SECONDS,
-    )
+    attempt = 0
+    while True:
+        try:
+            response = requests.get(
+                url,
+                headers={"User-Agent": USER_AGENT},
+                timeout=TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.Timeout:
+            if attempt < MAX_RETRIES:
+                attempt += 1
+                print(f"RETRY      {url}  (timeout, attempt {attempt + 1})")
+                time.sleep(RETRY_DELAY_SECONDS)
+                continue
+            raise FetchError(url, None, f"timed out after {attempt + 1} attempt(s)")
+        except requests.exceptions.RequestException as exc:
+            # Connection errors etc. are treated like any other
+            # unretryable failure — the site isn't reachable, retrying
+            # the same request immediately won't fix that.
+            raise FetchError(url, None, f"request failed: {exc}")
 
-    if response.status_code != 200:
-        response.raise_for_status()
+        status = response.status_code
 
-    html = response.text
-    path.write_text(html, encoding="utf-8")
+        if status == 200:
+            html = response.text
+            path.write_text(html, encoding="utf-8")
+            result = FetchResult(
+                url=url,
+                html=html,
+                status_code=status,
+                from_cache=False,
+                size_bytes=len(html.encode("utf-8")),
+            )
+            print(f"FETCH      {url}  status={status}  ({result.size_bytes} bytes)")
+            # Be a polite guest: only real, live requests pay the delay.
+            time.sleep(MIN_DELAY_SECONDS)
+            return result
 
-    result = FetchResult(
-        url=url,
-        html=html,
-        status_code=response.status_code,
-        from_cache=False,
-        size_bytes=len(html.encode("utf-8")),
-    )
-    print(f"FETCH      {url}  status={result.status_code}  ({result.size_bytes} bytes)")
+        if status in NON_RETRYABLE_STATUS_CODES:
+            raise FetchError(url, status, f"HTTP {status} — not retrying")
 
-    # Be a polite guest: only real, live requests pay the delay.
-    time.sleep(MIN_DELAY_SECONDS)
+        if 500 <= status < 600 and attempt < MAX_RETRIES:
+            attempt += 1
+            print(f"RETRY      {url}  (HTTP {status}, attempt {attempt + 1})")
+            time.sleep(RETRY_DELAY_SECONDS)
+            continue
 
-    return result
+        raise FetchError(url, status, f"unexpected HTTP {status}")
